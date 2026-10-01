@@ -25,7 +25,7 @@ export default function Charging({ session }: { session: Session }) {
       <Card>
         <div className="flex items-center gap-4">
           <BatteryGauge soc={session.soc_current} target={session.soc_target} />
-          <div className="min-w-0 flex-1 text-center">
+          <div className="min-w-0 flex-1 pt-10 text-center">
             <p className="text-xs text-slate-500">남은 시간</p>
             <p className="text-4xl font-bold tabular-nums tracking-tight" aria-live="off">
               {mmss(left)}

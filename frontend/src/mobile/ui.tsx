@@ -186,7 +186,7 @@ export function BatteryGauge({ soc, target }: { soc: number; target: number }) {
       </div>
       <div className="relative h-60 text-xs font-semibold">
         <span className="absolute left-0 whitespace-nowrap text-orange-700" style={{ bottom: "calc(80% - 8px)" }}>
-          ◀ 80% 이후 속도 감소
+          ◀ 80% 감속
         </span>
         <span
           className="absolute left-0 whitespace-nowrap text-slate-800"
