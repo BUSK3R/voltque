@@ -51,6 +51,14 @@ const CHARGER_STATE: Record<Charger["status"], string> = {
   fault: "점검 중",
 };
 
+/** An empty charger with a queue is about to be used (called, or held back by load control). */
+function chargerState(c: Charger): string {
+  if (c.status === "idle" && c.queue_total > 0) {
+    return c.blocks.some((b) => b.kind === "waiting" && b.status === "called") ? "호출 대기" : "시작 대기";
+  }
+  return CHARGER_STATE[c.status];
+}
+
 interface Placed {
   charger: Charger;
   row: number;
@@ -250,7 +258,7 @@ export default function Gantt({ schedule }: { schedule: Schedule }) {
               충전기 {c.charger_id}
             </text>
             <text x={10} y={AXIS_H + i * ROW_H + 48} fontSize={12} fill="#475569">
-              {c.rated_kw}kW · {CHARGER_STATE[c.status]}
+              {c.rated_kw}kW · {chargerState(c)}
             </text>
             <text x={10} y={AXIS_H + i * ROW_H + 64} fontSize={12} fill="#475569">
               대기 {c.queue_total}대

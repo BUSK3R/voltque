@@ -10,6 +10,13 @@ function chargerState(c: Charger): { label: string; tone: "ok" | "neutral" | "da
   if (c.status === "fault") return { label: "점검 중", tone: "danger" };
   if (c.status === "charging") return { label: "충전 중", tone: "neutral" };
   if (c.status === "occupied") return { label: "차량 이동 대기", tone: "neutral" };
+  if (c.queue_total > 0) {
+    // empty, but somebody is already ahead of a newcomer: never advertise it as free
+    const head = c.blocks.find((b) => b.kind === "waiting");
+    if (head?.status === "called") return { label: "호출 대기", tone: "neutral" };
+    if (head?.notice) return { label: "시작 지연", tone: "neutral" };
+    return { label: "대기 중", tone: "neutral" };
+  }
   return { label: "사용 가능", tone: "ok" };
 }
 
@@ -74,7 +81,7 @@ export default function Home() {
               <Card className="flex items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold">
+                    <span className="whitespace-nowrap text-lg font-bold">
                       {c.charger_id}번 · {c.rated_kw} kW
                     </span>
                     <Badge tone={st.tone}>{st.label}</Badge>
