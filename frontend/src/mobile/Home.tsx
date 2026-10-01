@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 import type { Charger } from "../api";
-import { useFeed } from "./feed";
+import { useFeed } from "../feed";
 import { hhmm, kw } from "./format";
 import { pathFor, useMySession } from "./session";
 import { Badge, Banner, Card } from "./ui";
@@ -9,6 +9,7 @@ import { Badge, Banner, Card } from "./ui";
 function chargerState(c: Charger): { label: string; tone: "ok" | "neutral" | "danger" } {
   if (c.status === "fault") return { label: "점검 중", tone: "danger" };
   if (c.status === "charging") return { label: "충전 중", tone: "neutral" };
+  if (c.status === "occupied") return { label: "차량 이동 대기", tone: "neutral" };
   return { label: "사용 가능", tone: "ok" };
 }
 

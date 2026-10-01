@@ -33,7 +33,7 @@ class QueueEntry:
 @dataclass(frozen=True)
 class Block:
     session_id: int
-    kind: Literal["charging", "waiting"]
+    kind: Literal["charging", "waiting", "parked"]  # parked = finished but still plugged in
     start: datetime
     end: datetime
 
@@ -43,8 +43,8 @@ class ChargerInfo:
     charger_id: int
     rated_kw: float
     connector_type: str
-    status: str  # idle | charging | fault
-    current: Block | None = None  # in-progress session; its end is E_cur
+    status: str  # idle | charging | occupied | fault
+    current: Block | None = None  # in-progress (or parked) session; its end is E_cur
 
 
 def duration_min(entry: QueueEntry, charger_kw: float) -> float:

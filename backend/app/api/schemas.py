@@ -1,5 +1,6 @@
+import datetime as dt
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,7 @@ class SessionCreate(BaseModel):
     soc_target: float = Field(ge=0, le=100)
     anon_user_id: str | None = Field(default=None, max_length=64)  # anonymous id only (PRD 4.4)
     enter_delay_min: float = Field(default=TAU_MIN, ge=0, le=30)  # simulated driver response
+    leave_delay_min: float = Field(default=0, ge=0, le=60)  # > 0: stays plugged in after done
     charger_id: int | None = None  # None = automatic assignment
 
 
@@ -91,6 +93,9 @@ class SessionOut(BaseModel):
     no_show_count: int
     actual_start: datetime | None
     actual_end: datetime | None
+    parked: bool  # finished but still plugged in (blocks the charger)
+    leave_at: datetime | None
+    nudged_at: datetime | None  # the operator asked the driver to move the car (A-05)
     lane: list[LaneBlock]
     calc: CalcOut
 
@@ -108,6 +113,8 @@ class BlockOut(BaseModel):
     soc_current: float
     alloc_kw: float | None
     notice: str | None
+    overstay_min: float | None  # parked blocks: minutes since the charge finished
+    nudged: bool
 
 
 class ChargerOut(BaseModel):
@@ -159,6 +166,25 @@ class KpiOut(BaseModel):
     baseline_over_limit_min: float
 
 
+class EventOut(BaseModel):
+    """One row of the operator event log (A-05)."""
+
+    seq: int
+    ts: datetime
+    type: str
+    session_id: int | None
+    model_name: str | None
+    payload: dict[str, Any]
+
+
+class KpiDayOut(BaseModel):
+    date: dt.date
+    sessions: int
+    avg_wait_min: float
+    load_factor: float
+    peak_reduction_kw: float
+
+
 class SimState(BaseModel):
     running: bool
     speed: int
@@ -170,6 +196,7 @@ class SimState(BaseModel):
 class SimStart(BaseModel):
     scenario: str | None = None  # file name in backend/scenarios without .json
     speed: Literal[1, 10, 60] = 1
+    autostart: bool = True  # False: load the scenario but leave the clock stopped
 
 
 class SimSpeed(BaseModel):

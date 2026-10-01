@@ -7,7 +7,7 @@ else
   PY := $(CURDIR)/backend/.venv/bin/python
 endif
 
-.PHONY: install dev dev-backend dev-frontend docker-up docker-down migrate seed test test-backend test-frontend
+.PHONY: install dev dev-backend dev-frontend docker-up docker-down migrate seed test test-backend test-frontend e2e
 
 install:  ## create backend venv + install deps, install frontend deps
 	python -m venv backend/.venv
@@ -42,3 +42,6 @@ test-backend:
 
 test-frontend:
 	npm --prefix frontend run typecheck
+
+e2e:  ## Playwright: replay the PRD 7.3 demo on its own backend (:8100) and Vite (:5174); needs Chrome
+	npm --prefix frontend run e2e

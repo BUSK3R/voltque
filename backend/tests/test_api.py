@@ -267,3 +267,70 @@ def test_called_session_exposes_no_show_deadline(client: TestClient) -> None:
         time.sleep(0.1)
     assert me["status"] == "called"
     assert me["called_at"] and me["no_show_at"]
+
+
+def _park(client: TestClient, leave: float = 30) -> dict[str, Any]:
+    """Register a short charge whose driver then stays plugged in; run it until done."""
+    res = client.post(
+        "/sessions",
+        json={"vehicle_id": IONIQ, "soc_start": 70, "soc_target": 80, "leave_delay_min": leave},
+    )
+    assert res.status_code == 201, res.text
+    sid = res.json()["session_id"]
+    mgr = client.app.state.runtime.mgr  # type: ignore[attr-defined]
+    for _ in range(600):
+        mgr.advance(30)
+        if mgr.primary.sessions[sid].parked:
+            break
+    body: dict[str, Any] = client.get(f"/sessions/{sid}").json()
+    return body
+
+
+def test_nudge_flow(client: TestClient) -> None:
+    body = _park(client)
+    assert body["status"] == "done" and body["parked"] is True and body["nudged_at"] is None
+    res = client.post(f"/sessions/{body['session_id']}/nudge")
+    assert res.status_code == 200 and res.json()["nudged_at"] is not None
+    assert client.post("/sessions/424242/nudge").status_code == 404
+    plain = register(client)
+    assert client.post(f"/sessions/{plain['session_id']}/nudge").status_code == 409
+
+
+def test_events_endpoint_and_snapshot_carry_the_log(client: TestClient) -> None:
+    body = _park(client)
+    client.post(f"/sessions/{body['session_id']}/nudge")
+    rows = client.get("/stations/1/events?limit=20").json()
+    types = [r["type"] for r in rows]
+    assert {"registered", "done", "nudged"} <= set(types)
+    assert [r["seq"] for r in rows] == sorted((r["seq"] for r in rows), reverse=True)  # newest first
+    assert rows[0]["model_name"]
+    with client.websocket_connect("/ws/stations/1") as ws:
+        snap = ws.receive_json()
+        assert snap["events"] and snap["events"][0]["seq"] == rows[0]["seq"]
+        assert "kpi" in snap
+
+
+def test_parked_block_is_in_the_schedule(client: TestClient) -> None:
+    body = _park(client)
+    sched = client.get("/stations/1/schedule").json()
+    parked = [
+        b for c in sched["chargers"] for b in c["blocks"] if b["session_id"] == body["session_id"]
+    ]
+    assert len(parked) == 1 and parked[0]["kind"] == "parked"
+    assert parked[0]["overstay_min"] is not None and parked[0]["nudged"] is False
+
+
+def test_kpi_history_is_seeded_oldest_first(client: TestClient) -> None:
+    rows = client.get("/stations/1/kpi/history").json()
+    assert len(rows) == 7
+    assert [r["date"] for r in rows] == sorted(r["date"] for r in rows)
+    assert set(rows[0]) == {"date", "sessions", "avg_wait_min", "load_factor", "peak_reduction_kw"}
+
+
+def test_sim_pause_and_scenario_loaded_without_autostart(client: TestClient) -> None:
+    state = client.post(
+        "/sim/start", json={"scenario": "demo", "speed": 10, "autostart": False}
+    ).json()
+    assert state["running"] is False and state["scenario"] == "demo" and state["speed"] == 10
+    assert client.post("/sim/start", json={"speed": 10}).json()["running"] is True
+    assert client.post("/sim/pause").json()["running"] is False

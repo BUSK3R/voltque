@@ -37,6 +37,8 @@ from app.engine.scheduler import (
 TICK_S = 10.0
 LOG_INTERVAL_S = 60.0
 MAX_NO_SHOWS = 2  # the second no-show ends the session (status no_show)
+OVERSTAY_MIN = 5.0  # a finished vehicle still plugged in after this long is "abandoned" (PRD A-05)
+NUDGE_LEAVE_MIN = 2.0  # simulated driver: leaves this long after the operator reminder
 ACTIVE = ("waiting", "called", "charging")
 
 Mode = Literal["baseline", "controlled"]
@@ -73,6 +75,7 @@ class SimSession:
     registered_at: datetime
     first_registered_at: datetime
     enter_delay_min: float = TAU_MIN
+    leave_delay_min: float = 0.0  # simulated driver: minutes the car stays plugged in after done
     status: str = "waiting"  # waiting | called | charging | done | cancelled | no_show
     called_at: datetime | None = None
     enter_at: datetime | None = None
@@ -85,6 +88,10 @@ class SimSession:
     notice: str | None = None  # why the driver is limited / delayed (D-06)
     resume_at: datetime | None = None  # forecast start of a delayed head
     calc_minutes: float | None = None
+    parked: bool = False  # done, but the car still occupies the charger
+    leave_at: datetime | None = None  # when a parked car will leave
+    nudged_at: datetime | None = None  # operator reminder (A-05)
+    overstay_flagged: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,8 +106,8 @@ class SimEvent:
 @dataclass(frozen=True)
 class BlockView:
     session_id: int
-    kind: str  # charging | waiting
-    status: str  # charging | called | waiting
+    kind: str  # charging | waiting | parked
+    status: str  # charging | called | waiting | done (parked)
     start: datetime
     end: datetime
     queue_pos: int | None  # 1-based among called+waiting; None while charging
@@ -110,6 +117,8 @@ class BlockView:
     soc_current: float
     alloc_kw: float | None
     notice: str | None
+    overstay_min: float | None = None  # parked blocks: minutes since the charge finished
+    nudged: bool = False  # parked blocks: the operator already reminded the driver
 
 
 @dataclass(frozen=True)
@@ -177,6 +186,12 @@ class SimWorld:
             key=lambda s: s.session_id,
         )
 
+    def _parked_on(self, charger_id: int) -> list[SimSession]:
+        return sorted(
+            (s for s in self.sessions.values() if s.parked and s.charger_id == charger_id),
+            key=lambda s: s.session_id,
+        )
+
     def _entry(self, s: SimSession) -> QueueEntry:
         return QueueEntry(
             session_id=s.session_id,
@@ -204,12 +219,23 @@ class SimWorld:
         infos: list[ChargerInfo] = []
         for c in self.chargers:
             charging = self._on_charger(c.charger_id, "charging")
+            parked = self._parked_on(c.charger_id)
             current: Block | None = None
             if charging:
                 s = charging[0]
                 end = self.now + timedelta(minutes=self._remaining_min(s))
                 current = Block(s.session_id, "charging", s.actual_start or self.now, end)
-            status = "fault" if c.fault else ("charging" if charging else "idle")
+            elif parked:
+                s = parked[0]
+                current = Block(
+                    s.session_id, "parked", s.actual_end or self.now, s.leave_at or self.now
+                )
+            if c.fault:
+                status = "fault"
+            elif charging:
+                status = "charging"
+            else:
+                status = "occupied" if parked else "idle"
             infos.append(ChargerInfo(c.charger_id, c.rated_kw, c.connector_type, status, current))
         return infos
 
@@ -224,6 +250,7 @@ class SimWorld:
         soc_target: float,
         enter_delay_min: float = TAU_MIN,
         charger_id: int | None = None,
+        leave_delay_min: float = 0.0,
     ) -> SimSession:
         """Put a vehicle into the queue of the charger with the earliest expected start
         (or of `charger_id` when the driver picked one).
@@ -249,6 +276,7 @@ class SimWorld:
             registered_at=self.now,
             first_registered_at=self.now,
             enter_delay_min=enter_delay_min,
+            leave_delay_min=leave_delay_min,
             calc_minutes=calc_for(
                 vehicle.params, soc_start, soc_target, self._spec(charger_id).rated_kw
             ).total_min,
@@ -298,6 +326,21 @@ class SimWorld:
         self._emit("cancelled", session_id, was=was)
         return s
 
+    def nudge(self, session_id: int) -> SimSession:
+        """Operator reminder to a parked driver (A-05): the simulated driver leaves shortly."""
+        s = self.sessions.get(session_id)
+        if s is None:
+            raise KeyError(session_id)
+        if not s.parked:
+            raise ValueError(f"session {session_id} is not parked")
+        if s.nudged_at is None:
+            s.nudged_at = self.now
+            s.leave_at = min(
+                s.leave_at or self.now, self.now + timedelta(minutes=NUDGE_LEAVE_MIN)
+            )
+            self._emit("nudged", session_id, charger_id=s.charger_id)
+        return s
+
     # ---- time ----------------------------------------------------------------------
 
     def advance(self, seconds: float) -> None:
@@ -313,6 +356,7 @@ class SimWorld:
         self.now += timedelta(seconds=TICK_S)
         self._charge(dt_h)
         self._enter_or_no_show()
+        self._leave_or_overstay()
         self._call_heads()
 
     def _charge(self, dt_h: float) -> None:
@@ -332,7 +376,9 @@ class SimWorld:
                 s.status = "done"
                 s.actual_end = self.now
                 s.p_kw = 0.0
-                self._emit("done", s.session_id, charger_id=s.charger_id)
+                s.parked = s.leave_delay_min > 0
+                s.leave_at = self.now + timedelta(minutes=s.leave_delay_min) if s.parked else None
+                self._emit("done", s.session_id, charger_id=s.charger_id, parked=s.parked)
         self.totals.peak_kw = max(self.totals.peak_kw, total)
         if total > self.limit_kw + 1e-6:
             self.totals.over_limit_s += TICK_S
@@ -348,6 +394,20 @@ class SimWorld:
                 self._enter(s)
             elif s.session_id in no_shows:
                 self._no_show(s)
+
+    def _leave_or_overstay(self) -> None:
+        for s in sorted(self.sessions.values(), key=lambda x: x.session_id):
+            if not s.parked or s.actual_end is None:
+                continue
+            if s.leave_at is not None and self.now >= s.leave_at:
+                s.parked = False
+                dwell = (self.now - s.actual_end).total_seconds() / 60
+                self._emit("left", s.session_id, charger_id=s.charger_id, dwell_min=round(dwell, 1))
+            elif not s.overstay_flagged and self.now - s.actual_end >= timedelta(
+                minutes=OVERSTAY_MIN
+            ):
+                s.overstay_flagged = True
+                self._emit("overstay", s.session_id, charger_id=s.charger_id)
 
     def _enter(self, s: SimSession) -> None:
         rated = self._spec(s.charger_id).rated_kw
@@ -392,7 +452,11 @@ class SimWorld:
         """Call the head of every free charger's queue (or delay it under load control)."""
         free: list[tuple[SimSession, ChargerSpec]] = []
         for c in self.chargers:
-            if c.fault or self._on_charger(c.charger_id, "charging", "called"):
+            if (
+                c.fault
+                or self._on_charger(c.charger_id, "charging", "called")
+                or self._parked_on(c.charger_id)
+            ):
                 continue
             queue = self._queue(c.charger_id)
             if queue:
@@ -465,6 +529,9 @@ class SimWorld:
                 pos = None
                 if b.kind == "waiting":
                     pos = [e.session_id for e in queue].index(b.session_id) + 1
+                overstay = None
+                if b.kind == "parked" and s.actual_end is not None:
+                    overstay = max(0.0, (self.now - s.actual_end).total_seconds() / 60)
                 views.append(
                     BlockView(
                         session_id=s.session_id,
@@ -479,6 +546,8 @@ class SimWorld:
                         soc_current=s.soc,
                         alloc_kw=s.alloc_cap_kw if s.status != "waiting" else None,
                         notice=s.notice,
+                        overstay_min=overstay,
+                        nudged=s.nudged_at is not None,
                     )
                 )
             out.append(
@@ -501,13 +570,14 @@ class SimWorld:
             if s.actual_start is not None
         ]
         mean_kw = sum(kw for _, kw in self.history) / len(self.history)
+        peak = self.totals.peak_kw
         return {
             "sessions_done": float(len(done)),
             "avg_wait_min": sum(waits) / len(waits) if waits else 0.0,
-            "load_factor": mean_kw / self.contract_kw if self.contract_kw else 0.0,
+            "load_factor": mean_kw / peak if peak > 0 else 0.0,  # PRD 5.3: mean load / peak load
             "peak_kw": self.totals.peak_kw,
             "over_limit_min": self.totals.over_limit_s / 60,
         }
 
     def is_idle(self) -> bool:
-        return not any(s.status in ACTIVE for s in self.sessions.values())
+        return not any(s.status in ACTIVE or s.parked for s in self.sessions.values())

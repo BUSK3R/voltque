@@ -5,7 +5,7 @@ import type { Session, SessionStatus } from "../api";
 import { Alerts } from "./Alerts";
 import Charging from "./Charging";
 import Done from "./Done";
-import { FeedProvider, useFeed } from "./feed";
+import { FeedProvider, useFeed } from "../feed";
 import Home from "./Home";
 import Queue from "./Queue";
 import Register from "./Register";

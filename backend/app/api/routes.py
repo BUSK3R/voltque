@@ -78,6 +78,20 @@ async def cancel_session(session_id: int, request: Request) -> schemas.SessionOu
     return rt.session_out(session_id)
 
 
+@router.post("/sessions/{session_id}/nudge", response_model=schemas.SessionOut)
+async def nudge_session(session_id: int, request: Request) -> schemas.SessionOut:
+    """Operator reminder to a driver who left a finished car plugged in (A-05)."""
+    rt = runtime(request)
+    try:
+        rt.mgr.nudge(session_id)
+    except KeyError:
+        raise HTTPException(404, f"session {session_id} not found") from None
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+    await rt.notify("nudged")
+    return rt.session_out(session_id)
+
+
 @router.get("/stations/{station_id}/schedule", response_model=schemas.ScheduleOut)
 async def schedule(station_id: int, request: Request) -> schemas.ScheduleOut:
     return station(runtime(request), station_id).schedule()
@@ -91,6 +105,16 @@ async def load(station_id: int, request: Request) -> schemas.LoadOut:
 @router.get("/stations/{station_id}/kpi", response_model=schemas.KpiOut)
 async def kpi(station_id: int, request: Request) -> schemas.KpiOut:
     return station(runtime(request), station_id).kpi()
+
+
+@router.get("/stations/{station_id}/events", response_model=list[schemas.EventOut])
+async def events(station_id: int, request: Request, limit: int = 60) -> list[schemas.EventOut]:
+    return station(runtime(request), station_id).events(max(1, min(limit, 500)))
+
+
+@router.get("/stations/{station_id}/kpi/history", response_model=list[schemas.KpiDayOut])
+async def kpi_history(station_id: int, request: Request) -> list[schemas.KpiDayOut]:
+    return station(runtime(request), station_id).kpi_history()
 
 
 @router.get("/sim/state", response_model=schemas.SimState)
@@ -108,8 +132,16 @@ async def sim_start(body: schemas.SimStart, request: Request) -> schemas.SimStat
             raise HTTPException(404, f"scenario {body.scenario!r} not found") from None
         rt.reset(scenario)
     rt.mgr.speed = body.speed
-    rt.mgr.running = True
-    await rt.notify("sim_started")
+    rt.mgr.running = body.autostart
+    await rt.notify("sim_started" if body.autostart else "sim_loaded")
+    return rt.state()
+
+
+@router.post("/sim/pause", response_model=schemas.SimState)
+async def sim_pause(request: Request) -> schemas.SimState:
+    rt = runtime(request)
+    rt.mgr.running = False
+    await rt.notify("sim_paused")
     return rt.state()
 
 

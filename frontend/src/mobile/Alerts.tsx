@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { useFeed, useSimNow } from "./feed";
+import { useFeed, useSimNow } from "../feed";
 import { hhmm, kw, mmss } from "./format";
 import { useMySession } from "./session";
 import { Banner } from "./ui";
@@ -57,6 +57,19 @@ export function Alerts() {
           {session.notice ?? `충전소 부하 보호를 위해 출력을 ${kw(session.alloc_kw)}로 제한합니다.`}
           {session.planned_end && <> 새 예상 종료 {hhmm(session.planned_end)}.</>}
         </Banner>,
+      );
+    }
+    if (session.status === "done" && session.parked) {
+      banners.push(
+        session.nudged_at ? (
+          <Banner key="nudge" tone="warn" label="이동 요청">
+            관제에서 차량 이동을 요청했습니다. 다음 대기 차량이 기다리고 있어요.
+          </Banner>
+        ) : (
+          <Banner key="parked" tone="info" label="충전 완료">
+            충전이 끝났습니다. 차량을 이동해 주세요.
+          </Banner>
+        ),
       );
     }
     if (session.status === "charging" && session.planned_end) {

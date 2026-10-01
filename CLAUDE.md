@@ -11,6 +11,7 @@
 | `make seed` | Alembic 마이그레이션 적용 후 시드 입력 (멱등) |
 | `make migrate` | `alembic upgrade head` |
 | `make test` | backend `pytest` + frontend `tsc` 타입체크 |
+| `make e2e` | Playwright로 PRD 7.3 시연 재현 (자체 백엔드 :8100·Vite :5174·별도 SQLite, 시스템 Chrome 필요) |
 | `make docker-up` | 같은 스택을 Docker Compose로 실행 (`--profile postgres`로 PostgreSQL) |
 
 새 마이그레이션: `cd backend && .venv/Scripts/alembic revision --autogenerate -m "msg"` (macOS/Linux는 `.venv/bin/alembic`).
@@ -33,9 +34,13 @@ backend/   FastAPI + SQLAlchemy 2 + Alembic (Python >=3.11)
   alembic/           마이그레이션
   tests/
 frontend/  React + TS + Vite + Tailwind
+  src/feed.tsx       모바일·관제 공용 WebSocket 피드 (같은 스냅샷 구독)
   src/mobile/        /m/*  운전자 모바일 (360px)
-  src/ops/           /ops/* 관제 PC (1440x900, 1920x1080)
+  src/ops/           /ops/* 관제 PC (1440x900, 1920x1080): Gantt · LoadGauge · LoadChart · KpiCards · EventLog · AlertsPanel · TopBar
+  e2e/               Playwright (PRD 7.3 시연 재현, 스크린샷은 docs/screenshots)
+docs/                DEMO.md(시연 스크립트) · QA.md(예상 질문) · screenshots/
 scripts/dev.py       make dev 런처
+scripts/e2e_backend.py  E2E용 백엔드 런처 (새 SQLite + 시드)
 ```
 
 ## 코딩 규칙
@@ -47,3 +52,5 @@ scripts/dev.py       make dev 런처
 - 차종·충전기 수치는 **시연용 임의 예시값**이다. 실제 제원처럼 서술하지 않는다.
 - 개인정보 미수집: 차량번호 등 금지, 익명 세션 ID만 사용 (PRD 4.4).
 - 프론트 API 호출은 `/api` 프록시 경유. 4단계부터 msw 등으로 백엔드를 목킹하지 않는다.
+- `make dev`는 Ctrl+C로 끈다. 창만 닫으면 uvicorn `--reload` 워커가 남아 8000 포트에서 옛 코드로 응답한다.
+- PRD 6장 `charger.status`는 idle/charging/fault만 허용한다. 방치 점유(`occupied`)는 API에서만 쓰고 DB 미러에는 `charging`으로 기록한다.

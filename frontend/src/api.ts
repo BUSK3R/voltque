@@ -67,6 +67,9 @@ export interface Session {
   no_show_count: number;
   actual_start: string | null;
   actual_end: string | null;
+  parked: boolean;
+  leave_at: string | null;
+  nudged_at: string | null;
   lane: LaneBlock[];
   calc: Calc;
 }
@@ -84,13 +87,18 @@ export interface Block {
   soc_current: number;
   alloc_kw: number | null;
   notice: string | null;
+  /** parked blocks only: minutes since the charge finished */
+  overstay_min: number | null;
+  nudged: boolean;
 }
+
+export type ChargerStatus = "idle" | "charging" | "occupied" | "fault";
 
 export interface Charger {
   charger_id: number;
   rated_kw: number;
   connector_type: string;
-  status: string;
+  status: ChargerStatus;
   queue_total: number;
   free_at: string;
   blocks: Block[];
@@ -107,6 +115,11 @@ export interface Schedule {
   chargers: Charger[];
 }
 
+export interface LoadPoint {
+  ts: string;
+  kw: number;
+}
+
 export interface Load {
   station_id: number;
   now: string;
@@ -114,6 +127,37 @@ export interface Load {
   limit_kw: number;
   now_kw: number;
   baseline_now_kw: number;
+  controlled: LoadPoint[];
+  baseline: LoadPoint[];
+}
+
+export interface Kpi {
+  station_id: number;
+  sessions_done: number;
+  avg_wait_min: number;
+  load_factor: number;
+  peak_kw: number;
+  baseline_peak_kw: number;
+  peak_reduction_kw: number;
+  over_limit_min: number;
+  baseline_over_limit_min: number;
+}
+
+export interface KpiDay {
+  date: string;
+  sessions: number;
+  avg_wait_min: number;
+  load_factor: number;
+  peak_reduction_kw: number;
+}
+
+export interface StationEvent {
+  seq: number;
+  ts: string;
+  type: string;
+  session_id: number | null;
+  model_name: string | null;
+  payload: Record<string, unknown>;
 }
 
 export interface SimState {
@@ -130,6 +174,9 @@ export interface Snapshot {
   sim: SimState;
   schedule: Schedule;
   load: Load;
+  kpi: Kpi;
+  /** newest first */
+  events: StationEvent[];
 }
 
 export interface NewSession {
@@ -139,6 +186,7 @@ export interface NewSession {
   anon_user_id: string;
   charger_id: number | null;
   enter_delay_min: number;
+  leave_delay_min?: number;
 }
 
 export class ApiError extends Error {
@@ -183,6 +231,19 @@ export const api = {
   createSession: (body: NewSession) => request<Session>("/sessions", post(body)),
   session: (id: number) => request<Session>(`/sessions/${id}`),
   cancel: (id: number) => request<Session>(`/sessions/${id}/cancel`, { method: "POST" }),
+  /** operator reminder to a driver who left a finished car plugged in (A-05) */
+  nudge: (id: number) => request<Session>(`/sessions/${id}/nudge`, { method: "POST" }),
+  kpiHistory: () => request<KpiDay[]>(`/stations/${STATION_ID}/kpi/history`),
+  sim: {
+    /** no scenario: continue the current state; with one: restart from its t=0 */
+    start: (speed: SimSpeed, scenario?: string, autostart = true) =>
+      request<SimState>("/sim/start", post({ speed, scenario, autostart })),
+    pause: () => request<SimState>("/sim/pause", { method: "POST" }),
+    speed: (speed: SimSpeed) => request<SimState>("/sim/speed", post({ speed })),
+    reset: () => request<SimState>("/sim/reset", { method: "POST" }),
+  },
 };
+
+export type SimSpeed = 1 | 10 | 60;
 
 export const STATION_ID = 1;

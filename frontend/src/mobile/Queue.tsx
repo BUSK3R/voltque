@@ -1,5 +1,5 @@
 import { api, type LaneBlock, type Session } from "../api";
-import { useSimNow } from "./feed";
+import { useSimNow } from "../feed";
 import { hhmm, minutes } from "./format";
 import { useMySession } from "./session";
 import { Badge, CalcBasis, Card, ConfirmButton } from "./ui";

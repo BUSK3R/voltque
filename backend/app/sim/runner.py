@@ -24,6 +24,7 @@ class Arrival:
     soc_start: float
     soc_target: float
     enter_delay_min: float = TAU_MIN
+    leave_delay_min: float = 0.0  # > 0: the car stays plugged in this long after it is done
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ def load_scenario(path: Path) -> Scenario:
             soc_start=float(a["soc_start"]),
             soc_target=float(a["soc_target"]),
             enter_delay_min=float(a.get("enter_delay_min", TAU_MIN)),
+            leave_delay_min=float(a.get("leave_delay_min", 0.0)),
         )
         for a in raw["arrivals"]
     )
@@ -120,6 +122,7 @@ class SimManager:
         soc_target: float,
         enter_delay_min: float = TAU_MIN,
         charger_id: int | None = None,
+        leave_delay_min: float = 0.0,
     ) -> SimSession:
         """Register in both worlds under the same session id; returns the controlled one."""
         vehicle = self.vehicles_by_id.get(vehicle_id)
@@ -129,10 +132,10 @@ class SimManager:
         anon = anon_user_id or f"sim-anon-{sid}"
         # validate on the primary first so a rejected request leaves nothing behind
         session = self.worlds["controlled"].register(
-            sid, vehicle, anon, soc_start, soc_target, enter_delay_min, charger_id
+            sid, vehicle, anon, soc_start, soc_target, enter_delay_min, charger_id, leave_delay_min
         )
         self.worlds["baseline"].register(
-            sid, vehicle, anon, soc_start, soc_target, enter_delay_min, charger_id
+            sid, vehicle, anon, soc_start, soc_target, enter_delay_min, charger_id, leave_delay_min
         )
         self._next_id += 1
         return session
@@ -144,11 +147,27 @@ class SimManager:
             self.worlds["baseline"].cancel(session_id)
         return session
 
+    def nudge(self, session_id: int) -> SimSession:
+        """Operator reminder to a parked driver; both worlds keep the same occupancy."""
+        session = self.worlds["controlled"].nudge(session_id)
+        baseline = self.worlds["baseline"].sessions.get(session_id)
+        if baseline is not None and baseline.parked:
+            self.worlds["baseline"].nudge(session_id)
+        return session
+
     def _inject_due(self) -> None:
         while self._pending and self._pending[0].t_min * 60 <= self._elapsed_s + 1e-9:
             a = self._pending.pop(0)
             vehicle = self.vehicles_by_name[a.vehicle]
-            self.register(vehicle.vehicle_id, None, a.soc_start, a.soc_target, a.enter_delay_min)
+            self.register(
+                vehicle.vehicle_id,
+                None,
+                a.soc_start,
+                a.soc_target,
+                a.enter_delay_min,
+                None,
+                a.leave_delay_min,
+            )
 
     def advance(self, seconds: float) -> None:
         """Advance both worlds; arrivals are injected at their scenario time."""

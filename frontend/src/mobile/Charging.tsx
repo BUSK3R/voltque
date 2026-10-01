@@ -1,5 +1,5 @@
 import { api, type Session } from "../api";
-import { useSimNow } from "./feed";
+import { useSimNow } from "../feed";
 import { hhmm, kw, mmss } from "./format";
 import { useMySession } from "./session";
 import { BatteryGauge, Badge, CalcBasis, Card, ConfirmButton } from "./ui";

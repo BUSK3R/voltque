@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { api, ApiError, type Session } from "../api";
-import { useFeed } from "./feed";
+import { useFeed } from "../feed";
 import { storeSessionId, storedSessionId } from "./store";
 
 interface SessionCtx {

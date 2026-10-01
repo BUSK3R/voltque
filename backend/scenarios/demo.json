@@ -4,9 +4,9 @@
   "contract_kw": 300,
   "limit_ratio": 0.9,
   "arrivals": [
-    {"t_min": 0,  "vehicle": "아이오닉 5 (예시)",     "soc_start": 20, "soc_target": 90},
+    {"t_min": 0,  "vehicle": "아이오닉 5 (예시)",     "soc_start": 20, "soc_target": 90, "leave_delay_min": 14},
     {"t_min": 1,  "vehicle": "EV6 (예시)",            "soc_start": 10, "soc_target": 80},
-    {"t_min": 2,  "vehicle": "코나 일렉트릭 (예시)",  "soc_start": 30, "soc_target": 80},
+    {"t_min": 2,  "vehicle": "코나 일렉트릭 (예시)",  "soc_start": 30, "soc_target": 80, "leave_delay_min": 9},
     {"t_min": 4,  "vehicle": "테슬라 모델 3 (예시)",  "soc_start": 20, "soc_target": 100},
     {"t_min": 6,  "vehicle": "레이 EV (예시)",        "soc_start": 15, "soc_target": 80},
     {"t_min": 9,  "vehicle": "아이오닉 5 (예시)",     "soc_start": 40, "soc_target": 90},

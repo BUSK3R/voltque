@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import ChargeSession, Charger, SessionEvent, Station, VehicleSpec
+from app.models import Charger, ChargeSession, KpiDaily, SessionEvent, Station, VehicleSpec
 
 STATION_NAME = "목포급속 1호점"
 
@@ -36,9 +36,46 @@ SESSIONS: list[tuple[int, int, str, float, float, str, int | None, int | None]] 
 ]
 
 
+# Previous 7 days for the ops KPI cards (oldest first). ARBITRARY EXAMPLE VALUES, not measurements:
+# (sessions, avg_wait_min, load_factor = mean / peak load, peak_reduction_kw)
+KPI_HISTORY: list[tuple[int, float, float, float]] = [
+    (38, 11.8, 0.52, 22.0),
+    (41, 12.5, 0.55, 30.0),
+    (36, 13.1, 0.50, 18.0),
+    (44, 10.9, 0.57, 35.0),
+    (40, 12.0, 0.54, 28.0),
+    (39, 12.8, 0.53, 25.0),
+    (42, 11.5, 0.56, 31.0),
+]
+
+
+def seed_kpi_history(db: Session, station_id: int) -> bool:
+    """Insert the example KPI history once; returns whether anything was added."""
+    if db.scalar(select(KpiDaily.station_id).where(KpiDaily.station_id == station_id)) is not None:
+        return False
+    today = datetime.now(UTC).date()
+    for i, (sessions, wait, factor, reduction) in enumerate(reversed(KPI_HISTORY), start=1):
+        db.add(
+            KpiDaily(
+                station_id=station_id,
+                date=today - timedelta(days=i),
+                sessions=sessions,
+                avg_wait_min=wait,
+                load_factor=factor,
+                peak_reduction_kw=reduction,
+            )
+        )
+    return True
+
+
 def seed(db: Session) -> None:
-    if db.scalar(select(Station.station_id).where(Station.name == STATION_NAME)) is not None:
-        print("already seeded; skipping")
+    existing = db.scalar(select(Station.station_id).where(Station.name == STATION_NAME))
+    if existing is not None:
+        if seed_kpi_history(db, existing):
+            db.commit()
+            print("seeded: KPI history only (stations already existed)")
+        else:
+            print("already seeded; skipping")
         return
 
     station = Station(name=STATION_NAME, lat=34.8118, lng=126.3922, contract_kw=400, limit_ratio=0.9)
@@ -79,6 +116,7 @@ def seed(db: Session) -> None:
         db.add(SessionEvent(session_id=session.session_id, type="seeded", payload={"status": status}))
         if status == "charging":
             chargers[c_idx].status = "charging"
+    seed_kpi_history(db, station.station_id)
     db.commit()
     print(f"seeded: 1 station, {len(chargers)} chargers, {len(vehicles)} vehicles, "
           f"{len(SESSIONS)} sessions")

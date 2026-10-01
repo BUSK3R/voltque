@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 
 import type { Session } from "../api";
-import { useFeed } from "./feed";
+import { useFeed } from "../feed";
 import { hhmm } from "./format";
 import { useMySession } from "./session";
 import { Badge, Button, Card } from "./ui";
@@ -66,6 +66,11 @@ export default function Done({ session }: { session: Session }) {
         <p className="mt-1 text-sm text-slate-600">
           다음 차량이 기다리고 있을 수 있어요. 충전이 끝나면 바로 자리를 비워 주세요.
         </p>
+        {session.parked && (
+          <p className="mt-1 text-sm font-semibold text-orange-800">
+            아직 충전기에 연결되어 있습니다{session.nudged_at ? " · 관제에서 이동을 요청했습니다" : ""}.
+          </p>
+        )}
         <div className="mt-2">
           <Badge tone={nextState.tone}>{nextState.text}</Badge>
         </div>

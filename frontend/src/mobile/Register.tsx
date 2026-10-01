@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 
 import { api, ApiError, type Estimate, type Vehicle } from "../api";
-import { useFeed } from "./feed";
+import { useFeed } from "../feed";
 import { hhmm, minutes } from "./format";
 import { useMySession } from "./session";
 import { anonId } from "./store";
@@ -25,6 +25,7 @@ export default function Register() {
   const [soc, setSoc] = useState<[number, number]>([20, 80]);
   const [chargerId, setChargerId] = useState<number | null>(null); // null = automatic
   const [enterDelay, setEnterDelay] = useState(3);
+  const [leaveDelay, setLeaveDelay] = useState(0);
   const [estimate, setEstimate] = useState<EstimateState>({ kind: "idle" });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -84,6 +85,7 @@ export default function Register() {
         anon_user_id: anonId(),
         charger_id: chargerId,
         enter_delay_min: enterDelay,
+        leave_delay_min: leaveDelay,
       });
       start(created.session_id);
       navigate("/m/queue", { replace: true });
@@ -192,6 +194,17 @@ export default function Register() {
           >
             <option value={3}>3분 (정상 진입)</option>
             <option value={6}>6분 (노쇼 체험 · 5분 유예 초과)</option>
+          </select>
+        </label>
+        <label className="mt-3 block">
+          <span className="text-slate-600">충전 완료 후 차량 이동까지 걸리는 시간 (가상 운전자)</span>
+          <select
+            value={leaveDelay}
+            onChange={(e) => setLeaveDelay(Number(e.target.value))}
+            className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3"
+          >
+            <option value={0}>즉시 이동</option>
+            <option value={12}>12분 (방치 체험 · 관제 알림 확인)</option>
           </select>
         </label>
       </details>

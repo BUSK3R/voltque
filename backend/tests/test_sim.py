@@ -281,3 +281,93 @@ def test_manager_registers_in_both_worlds_with_the_same_id() -> None:
     with pytest.raises(ValueError):
         mgr.register(1, None, 90, 20)
     assert len(mgr.worlds["baseline"].sessions) == 1  # failed request left nothing behind
+
+
+# --- parked (finished but still plugged in) and operator nudge (A-05) -------------------
+
+
+def add_parked(w: SimWorld, sid: int, leave: float, s0: float = 70, s1: float = 80) -> None:
+    w.register(sid, IONIQ, f"sim-{sid}", s0, s1, TAU_MIN, None, leave)
+
+
+def test_parked_car_blocks_the_charger_until_it_leaves() -> None:
+    w = single()
+    add_parked(w, 1, leave=12)
+    add(w, 2, RAY, 20, 60)
+    minutes_to(w, lambda: w.sessions[1].status == "done")
+    assert w.sessions[1].parked and w.schedule()[0].status == "occupied"
+    assert w.sessions[2].status == "waiting"  # the head is NOT called while the car is parked
+    block = w.schedule()[0].blocks[0]
+    assert block.kind == "parked" and block.session_id == 1
+    minutes_to(w, lambda: not w.sessions[1].parked)
+    assert w.sessions[2].status in ("called", "charging")
+    left = [e for e in w.events if e.type == "left"]
+    assert len(left) == 1 and left[0].payload["dwell_min"] == pytest.approx(12, abs=0.3)
+
+
+def test_overstay_is_flagged_once_after_five_minutes() -> None:
+    w = single()
+    add_parked(w, 1, leave=20)
+    minutes_to(w, lambda: w.sessions[1].status == "done")
+    done_at = w.sessions[1].actual_end
+    assert done_at is not None
+    minutes_to(w, lambda: any(e.type == "overstay" for e in w.events))
+    flagged = [e for e in w.events if e.type == "overstay"]
+    assert len(flagged) == 1
+    assert (flagged[0].ts - done_at).total_seconds() / 60 == pytest.approx(5, abs=0.3)
+    for _ in range(60):
+        w.step()
+    assert len([e for e in w.events if e.type == "overstay"]) == 1
+    view = w.schedule()[0].blocks[0]
+    assert view.overstay_min is not None and view.overstay_min > 5 and not view.nudged
+
+
+def test_nudge_makes_the_driver_leave_soon_and_is_idempotent() -> None:
+    w = single()
+    add_parked(w, 1, leave=30)
+    minutes_to(w, lambda: w.sessions[1].status == "done")
+    w.nudge(1)
+    assert w.schedule()[0].blocks[0].nudged
+    first = w.sessions[1].leave_at
+    w.step()
+    w.nudge(1)  # a second press changes nothing
+    assert w.sessions[1].leave_at == first
+    assert len([e for e in w.events if e.type == "nudged"]) == 1
+    minutes_to(w, lambda: not w.sessions[1].parked, limit=5)
+    assert not w.sessions[1].parked  # left well before the original 30 min
+
+
+def test_nudge_rejects_unknown_and_not_parked_sessions() -> None:
+    w = single()
+    add(w, 1)
+    with pytest.raises(KeyError):
+        w.nudge(99)
+    with pytest.raises(ValueError):
+        w.nudge(1)  # still waiting / charging
+
+
+def test_manager_nudge_keeps_both_worlds_in_step() -> None:
+    mgr = SimManager(CHARGERS, VEHICLES, 400, 0.9, T0)
+    s = mgr.register(IONIQ.vehicle_id, None, 70, 80, TAU_MIN, 3, 30)
+    while not mgr.worlds["controlled"].sessions[s.session_id].parked:
+        mgr.advance(10)
+    mgr.nudge(s.session_id)
+    assert mgr.worlds["baseline"].sessions[s.session_id].nudged_at is not None
+
+
+def test_load_factor_is_mean_over_peak() -> None:
+    w = single()
+    add(w, 1)
+    minutes_to(w, lambda: w.sessions[1].status == "done")
+    k = w.kpi()
+    mean = sum(kw for _, kw in w.history) / len(w.history)
+    assert k["load_factor"] == pytest.approx(mean / k["peak_kw"])
+    assert 0 < k["load_factor"] <= 1
+
+
+def test_demo_scenario_exercises_overstay() -> None:
+    sc = load_scenario(find_scenario("demo"))
+    mgr = run_scenario(sc, CHARGERS, VEHICLES, 400, 0.9, T0, speed=60)
+    types = {e.type for e in mgr.primary.events}
+    assert {"overstay", "left"} <= types
+    assert mgr.finished()

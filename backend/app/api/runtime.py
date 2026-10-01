@@ -17,13 +17,22 @@ from sqlalchemy.orm import Session
 from app.api import schemas
 from app.engine.charge_time import ChargeTimeResult, VehicleParams, calc_for
 from app.engine.scheduler import NO_SHOW_GRACE_MIN
-from app.models import Charger, ChargeSession, LoadLog, SessionEvent, Station, VehicleSpec
+from app.models import (
+    Charger,
+    ChargeSession,
+    KpiDaily,
+    LoadLog,
+    SessionEvent,
+    Station,
+    VehicleSpec,
+)
 from app.sim.runner import FIRST_SESSION_ID, Scenario, SimManager
 from app.sim.world import BlockView, ChargerSpec, ChargerView, SimSession, VehicleInfo
 
 SessionFactory = Callable[[], Session]
 TICK_REAL_S = 0.5  # real seconds between ticker iterations (sim advances speed x this)
 MAX_SERIES = 1440
+MAX_EVENTS = 60  # event log rows pushed with every snapshot
 
 
 class Hub:
@@ -120,6 +129,7 @@ class StationRuntime:
             body.soc_target,
             body.enter_delay_min,
             body.charger_id,
+            body.leave_delay_min,
         )
 
     def estimate(self, body: schemas.EstimateIn) -> schemas.EstimateOut:
@@ -217,6 +227,9 @@ class StationRuntime:
             no_show_count=s.no_show_count,
             actual_start=s.actual_start,
             actual_end=s.actual_end,
+            parked=s.parked,
+            leave_at=s.leave_at if s.parked else None,
+            nudged_at=s.nudged_at,
             lane=lane,
             calc=self._calc(s),
         )
@@ -279,6 +292,44 @@ class StationRuntime:
             baseline_over_limit_min=b["over_limit_min"],
         )
 
+    def events(self, limit: int = MAX_EVENTS) -> list[schemas.EventOut]:
+        """Newest first. Events come from the controlled world, the one operators act on."""
+        w = self.mgr.primary
+        out: list[schemas.EventOut] = []
+        for e in reversed(w.events[-limit:]):
+            s = w.sessions.get(e.session_id) if e.session_id is not None else None
+            out.append(
+                schemas.EventOut(
+                    seq=e.seq,
+                    ts=e.ts,
+                    type=e.type,
+                    session_id=e.session_id,
+                    model_name=s.vehicle.model_name if s else None,
+                    payload=e.payload,
+                )
+            )
+        return out
+
+    def kpi_history(self, days: int = 14) -> list[schemas.KpiDayOut]:
+        """Previous days for the KPI cards (demo example values, see seed.py)."""
+        with self.factory() as db:
+            rows = db.scalars(
+                select(KpiDaily)
+                .where(KpiDaily.station_id == self.station_id)
+                .order_by(KpiDaily.date.desc())
+                .limit(days)
+            ).all()
+        return [
+            schemas.KpiDayOut(
+                date=r.date,
+                sessions=r.sessions,
+                avg_wait_min=r.avg_wait_min,
+                load_factor=r.load_factor,
+                peak_reduction_kw=r.peak_reduction_kw,
+            )
+            for r in reversed(rows)
+        ]
+
     def snapshot(self, reason: str) -> dict[str, Any]:
         return {
             "type": "snapshot",
@@ -287,6 +338,7 @@ class StationRuntime:
             "schedule": self.schedule().model_dump(mode="json"),
             "load": self.load().model_dump(mode="json"),
             "kpi": self.kpi().model_dump(mode="json"),
+            "events": [e.model_dump(mode="json") for e in self.events(MAX_EVENTS)],
         }
 
     # ---- push + persistence -----------------------------------------------------------
@@ -382,8 +434,10 @@ class StationRuntime:
                 self._log_cursor[mode] = len(world.history)
             for cv in views:
                 charger = db.get(Charger, cv.charger_id)
-                if charger is not None and charger.status != cv.status:
-                    charger.status = cv.status
+                # PRD 6 allows idle/charging/fault only: a parked car still occupies the connector
+                db_status = "charging" if cv.status == "occupied" else cv.status
+                if charger is not None and charger.status != db_status:
+                    charger.status = db_status
             db.commit()
 
 
