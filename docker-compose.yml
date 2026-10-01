@@ -1,0 +1,41 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # SQLite by default. To use PostgreSQL: `docker compose --profile postgres up` and set
+      # DATABASE_URL=postgresql+psycopg://voltqueue:voltqueue@postgres:5432/voltqueue
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/voltqueue.db}
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/scenarios:/app/scenarios
+      - sqlite-data:/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_BACKEND_URL: http://backend:8000
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: voltqueue
+      POSTGRES_PASSWORD: voltqueue
+      POSTGRES_DB: voltqueue
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+volumes:
+  sqlite-data:
+  pg-data:

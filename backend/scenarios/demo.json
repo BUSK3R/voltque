@@ -1,0 +1,18 @@
+{
+  "name": "demo",
+  "_note": "시연용 시나리오. 도착 시각·차종·SoC·계약전력은 임의의 예시값이며 실제 데이터가 아니다. 차종 이름은 seed의 vehicle_spec.model_name과 같아야 한다.",
+  "contract_kw": 300,
+  "limit_ratio": 0.9,
+  "arrivals": [
+    {"t_min": 0,  "vehicle": "아이오닉 5 (예시)",     "soc_start": 20, "soc_target": 90},
+    {"t_min": 1,  "vehicle": "EV6 (예시)",            "soc_start": 10, "soc_target": 80},
+    {"t_min": 2,  "vehicle": "코나 일렉트릭 (예시)",  "soc_start": 30, "soc_target": 80},
+    {"t_min": 4,  "vehicle": "테슬라 모델 3 (예시)",  "soc_start": 20, "soc_target": 100},
+    {"t_min": 6,  "vehicle": "레이 EV (예시)",        "soc_start": 15, "soc_target": 80},
+    {"t_min": 9,  "vehicle": "아이오닉 5 (예시)",     "soc_start": 40, "soc_target": 90},
+    {"t_min": 15, "vehicle": "EV6 (예시)",            "soc_start": 20, "soc_target": 90, "enter_delay_min": 6},
+    {"t_min": 20, "vehicle": "코나 일렉트릭 (예시)",  "soc_start": 10, "soc_target": 80},
+    {"t_min": 25, "vehicle": "레이 EV (예시)",        "soc_start": 50, "soc_target": 80},
+    {"t_min": 30, "vehicle": "테슬라 모델 3 (예시)",  "soc_start": 30, "soc_target": 90}
+  ]
+}
